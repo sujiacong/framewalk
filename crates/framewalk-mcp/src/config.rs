@@ -37,7 +37,8 @@ pub enum Mode {
 #[command(name = "framewalk-mcp", version, about)]
 pub struct Config {
     /// Path to the `gdb` binary to spawn. Defaults to `gdb` resolved via
-    /// `PATH`.
+    /// `PATH`. When `--ssh-host` is set, this is the path to `gdb` on the
+    /// remote machine.
     #[arg(long, env = "FRAMEWALK_GDB", default_value = "gdb")]
     pub gdb: String,
 
@@ -57,7 +58,14 @@ pub struct Config {
     /// Enable GDB non-stop mode during session bootstrap.  Defaults to
     /// `true`.  Pass `--no-non-stop` when connecting to remote stubs
     /// that only speak all-stop (e.g. QEMU's gdbstub, many JTAG probes).
-    #[arg(long, env = "FRAMEWALK_NON_STOP", default_value_t = true)]
+    #[arg(
+        long,
+        env = "FRAMEWALK_NON_STOP",
+        default_value_t = true,
+        num_args = 0..=1,
+        default_missing_value = "true",
+        action = clap::ArgAction::Set,
+    )]
     pub non_stop: bool,
 
     /// **Security boundary.** Allow the `mi_raw_command` tool to pass
@@ -90,4 +98,47 @@ pub struct Config {
         default_value_t = 30
     )]
     pub wait_for_stop_timeout_secs: u64,
+
+    // -----------------------------------------------------------------------
+    // SSH remote GDB — optional. When `--ssh-host` is set, the GDB
+    // subprocess is spawned on the remote host through an SSH tunnel.
+    // -----------------------------------------------------------------------
+    /// SSH remote host (hostname or IP). When set, GDB runs on the
+    /// remote machine via `ssh`. Requires the `ssh` binary on `PATH`.
+    #[arg(long, env = "FRAMEWALK_SSH_HOST")]
+    pub ssh_host: Option<String>,
+
+    /// SSH port (default: 22). Ignored unless `--ssh-host` is set.
+    #[arg(long, env = "FRAMEWALK_SSH_PORT", default_value_t = 22)]
+    pub ssh_port: u16,
+
+    /// SSH username for remote login. Optional; uses the SSH config
+    /// default (typically the local username) when omitted.
+    #[arg(long, env = "FRAMEWALK_SSH_USER")]
+    pub ssh_user: Option<String>,
+
+    /// Path to an SSH identity (private key) file for authentication.
+    #[arg(long, env = "FRAMEWALK_SSH_IDENTITY_FILE")]
+    pub ssh_identity_file: Option<PathBuf>,
+
+    // -----------------------------------------------------------------------
+    // GDB startup target — mutually exclusive convenience options for
+    // debugging a core dump or attaching to a running process.
+    // -----------------------------------------------------------------------
+    /// Debug a core dump file. Passed to GDB as `--core <path>` on
+    /// startup. Mutually exclusive with `--pid`.
+    #[arg(long, env = "FRAMEWALK_CORE")]
+    pub core: Option<PathBuf>,
+
+    /// Attach GDB to a running process by PID. Passed to GDB as `-p
+    /// <pid>` on startup. Mutually exclusive with `--core`.
+    #[arg(long, env = "FRAMEWALK_PID")]
+    pub pid: Option<u32>,
+
+    /// Extra arguments passed to the GDB binary on startup. Useful for
+    /// arbitrary GDB flags not covered by `--core` / `--pid`. Repeat
+    /// `--gdb-arg` for multiple arguments; the `FRAMEWALK_GDB_ARGS` env
+    /// var splits on ASCII whitespace.
+    #[arg(long = "gdb-arg", env = "FRAMEWALK_GDB_ARGS", value_delimiter = ' ')]
+    pub gdb_args: Vec<String>,
 }

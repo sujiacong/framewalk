@@ -16,10 +16,48 @@ use std::sync::Arc;
 use anyhow::Context as _;
 use clap::Parser;
 use framewalk_mcp::{BackgroundTasks, Config, FramewalkMcp, SchemeHandle, SchemeSettings};
-use framewalk_mi_transport::{GdbConfig, spawn};
+use framewalk_mi_transport::{GdbConfig, SshConfig, spawn};
 use rmcp::{ServiceExt, transport::stdio};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
+
+/// Translate the parsed CLI [`Config`] into a transport [`GdbConfig`].
+///
+/// Applies `--core` / `--pid` / `--gdb-arg` as GDB extra args, and wraps
+/// the invocation in SSH when `--ssh-host` is set. The caller is
+/// responsible for validating that `--core` and `--pid` are not both set.
+fn build_gdb_config(config: &Config) -> GdbConfig {
+    // Build GDB extra args from --core, --pid, and --gdb-arg flags.
+    let mut gdb_extra_args: Vec<String> = Vec::new();
+    if let Some(ref core_path) = config.core {
+        gdb_extra_args.push("--core".to_string());
+        gdb_extra_args.push(core_path.to_string_lossy().into_owned());
+    }
+    if let Some(pid) = config.pid {
+        gdb_extra_args.push("-p".to_string());
+        gdb_extra_args.push(pid.to_string());
+    }
+    gdb_extra_args.extend(config.gdb_args.clone());
+
+    let mut gdb_config = GdbConfig::new()
+        .with_program(&config.gdb)
+        .with_non_stop(config.non_stop)
+        .with_args(&gdb_extra_args);
+    if let Some(cwd) = &config.cwd {
+        gdb_config = gdb_config.with_cwd(cwd.clone());
+    }
+    if let Some(ref host) = config.ssh_host {
+        let mut ssh = SshConfig::new(host).with_port(config.ssh_port);
+        if let Some(ref user) = config.ssh_user {
+            ssh = ssh.with_user(user);
+        }
+        if let Some(ref key) = config.ssh_identity_file {
+            ssh = ssh.with_identity_file(key.clone());
+        }
+        gdb_config = gdb_config.with_ssh(ssh);
+    }
+    gdb_config
+}
 
 /// `current_thread` is load-bearing: rmcp dispatches each MCP request
 /// as an independent `tokio::spawn` task, so on a multi-thread runtime
@@ -48,16 +86,18 @@ async fn main() -> anyhow::Result<()> {
         ?config.mode,
         scheme_eval_timeout_secs = config.scheme_eval_timeout_secs,
         wait_for_stop_timeout_secs = config.wait_for_stop_timeout_secs,
+        ssh_host = ?config.ssh_host,
+        core = ?config.core,
+        pid = config.pid,
         "starting framewalk-mcp"
     );
 
-    // Build the GDB transport.
-    let mut gdb_config = GdbConfig::new()
-        .with_program(&config.gdb)
-        .with_non_stop(config.non_stop);
-    if let Some(cwd) = &config.cwd {
-        gdb_config = gdb_config.with_cwd(cwd.clone());
+    // Validate mutual exclusivity of --core and --pid.
+    if config.core.is_some() && config.pid.is_some() {
+        anyhow::bail!("--core and --pid are mutually exclusive; specify only one");
     }
+
+    let gdb_config = build_gdb_config(&config);
     let transport = spawn(gdb_config)
         .await
         .context("failed to spawn gdb subprocess")?;
