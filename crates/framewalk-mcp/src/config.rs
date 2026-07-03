@@ -125,8 +125,16 @@ pub struct Config {
     // GDB startup target — mutually exclusive convenience options for
     // debugging a core dump or attaching to a running process.
     // -----------------------------------------------------------------------
+    /// Path to the program binary that produced the core dump (or the
+    /// binary to debug). Passed to GDB as the executable argument,
+    /// placed after `--core` / `-p` so GDB loads the correct symbol
+    /// table. Required when `--core` is set; optional for `--pid`.
+    #[arg(long, env = "FRAMEWALK_EXEC")]
+    pub exec: Option<PathBuf>,
+
     /// Debug a core dump file. Passed to GDB as `--core <path>` on
-    /// startup. Mutually exclusive with `--pid`.
+    /// startup. Mutually exclusive with `--pid`. Use `--exec` to
+    /// specify the binary that produced the core.
     #[arg(long, env = "FRAMEWALK_CORE")]
     pub core: Option<PathBuf>,
 
@@ -136,9 +144,9 @@ pub struct Config {
     pub pid: Option<u32>,
 
     /// Extra arguments passed to the GDB binary on startup. Useful for
-    /// arbitrary GDB flags not covered by `--core` / `--pid`. Repeat
-    /// `--gdb-arg` for multiple arguments; the `FRAMEWALK_GDB_ARGS` env
-    /// var splits on ASCII whitespace.
+    /// arbitrary GDB flags not covered by `--core` / `--pid` / `--exec`.
+    /// Repeat `--gdb-arg` for multiple arguments; the
+    /// `FRAMEWALK_GDB_ARGS` env var splits on ASCII whitespace.
     #[arg(long = "gdb-arg", env = "FRAMEWALK_GDB_ARGS", value_delimiter = ' ')]
     pub gdb_args: Vec<String>,
 }

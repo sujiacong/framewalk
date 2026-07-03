@@ -23,11 +23,14 @@ use tracing_subscriber::EnvFilter;
 
 /// Translate the parsed CLI [`Config`] into a transport [`GdbConfig`].
 ///
-/// Applies `--core` / `--pid` / `--gdb-arg` as GDB extra args, and wraps
-/// the invocation in SSH when `--ssh-host` is set. The caller is
-/// responsible for validating that `--core` and `--pid` are not both set.
+/// Applies `--core` / `--pid` / `--exec` / `--gdb-arg` as GDB extra
+/// args, and wraps the invocation in SSH when `--ssh-host` is set.  The
+/// caller is responsible for validating that `--core` and `--pid` are
+/// not both set.
 fn build_gdb_config(config: &Config) -> GdbConfig {
-    // Build GDB extra args from --core, --pid, and --gdb-arg flags.
+    // Build GDB extra args.  Ordering matches GDB's expected argv:
+    //   gdb [options] --core <core> <exec>    or    gdb [options] -p <pid> <exec>
+    // `--core` / `-p` come first, then the binary, then any user extras.
     let mut gdb_extra_args: Vec<String> = Vec::new();
     if let Some(ref core_path) = config.core {
         gdb_extra_args.push("--core".to_string());
@@ -36,6 +39,9 @@ fn build_gdb_config(config: &Config) -> GdbConfig {
     if let Some(pid) = config.pid {
         gdb_extra_args.push("-p".to_string());
         gdb_extra_args.push(pid.to_string());
+    }
+    if let Some(ref exec_path) = config.exec {
+        gdb_extra_args.push(exec_path.to_string_lossy().into_owned());
     }
     gdb_extra_args.extend(config.gdb_args.clone());
 
