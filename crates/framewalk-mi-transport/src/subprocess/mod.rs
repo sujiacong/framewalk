@@ -240,7 +240,7 @@ async fn bootstrap_session(handle: &TransportHandle, non_stop: bool) -> Result<(
 
     for raw in &commands {
         let Ok(outcome) =
-            tokio::time::timeout(Duration::from_secs(2), handle.submit_raw(raw)).await
+            tokio::time::timeout(Duration::from_secs(120), handle.submit_raw(raw)).await
         else {
             return Err(TransportError::Bootstrap {
                 command: (*raw).to_string(),
