@@ -54,6 +54,25 @@ fn build_argv(config: &GdbConfig) -> Vec<std::ffi::OsString> {
         "--quiet".into(),
         "--nx".into(),
     ];
+    // Bootstrap settings injected via `-iex` so they take effect before
+    // any inferior exists — load-bearing for `--pid` / `--core` modes
+    // where GDB rejects `-gdb-set mi-async` after attach.
+    gdb_argv.extend(
+        [
+            "-iex",
+            "set mi-async on",
+            "-iex",
+            "set pagination off",
+            "-iex",
+            "set confirm off",
+        ]
+        .iter()
+        .map(|s| OsString::from(*s)),
+    );
+    if config.non_stop {
+        gdb_argv.push("-iex".into());
+        gdb_argv.push("set non-stop on".into());
+    }
     gdb_argv.extend(config.extra_args.iter().map(OsString::from));
 
     if let Some(ssh) = &config.ssh {
@@ -250,6 +269,20 @@ async fn bootstrap_session(handle: &TransportHandle, non_stop: bool) -> Result<(
 
         match outcome {
             Ok(CommandOutcome::Done(_) | CommandOutcome::Connected(_)) => {}
+            Ok(CommandOutcome::Error { msg, .. })
+                if msg.contains("while the inferior is running") =>
+            {
+                // `--pid` / `--core` modes: the inferior already exists
+                // when bootstrap runs.  The `-iex` flags in `build_argv`
+                // applied these settings before attach; the MI command is
+                // just a redundant confirmation that fails because the
+                // setting is immutable after the inferior is loaded.
+                tracing::warn!(
+                    command = raw,
+                    "bootstrap setting cannot be changed with an active inferior; \
+                     the `-iex` flag should have applied it before attach"
+                );
+            }
             Ok(CommandOutcome::Error { msg, .. }) => {
                 return Err(TransportError::Bootstrap {
                     command: (*raw).to_string(),
@@ -288,7 +321,20 @@ mod tests {
         let argv = build_argv(&config);
         assert_eq!(
             argv_strings(&argv),
-            vec!["gdb", "--interpreter=mi3", "--quiet", "--nx"]
+            vec![
+                "gdb",
+                "--interpreter=mi3",
+                "--quiet",
+                "--nx",
+                "-iex",
+                "set mi-async on",
+                "-iex",
+                "set pagination off",
+                "-iex",
+                "set confirm off",
+                "-iex",
+                "set non-stop on",
+            ]
         );
     }
 
@@ -296,6 +342,7 @@ mod tests {
     fn build_argv_local_forwards_extra_args_in_order() {
         let config = GdbConfig::new()
             .with_program("gdb")
+            .with_non_stop(false)
             .with_arg("--core")
             .with_arg("/tmp/core");
         let argv = build_argv(&config);
@@ -306,6 +353,12 @@ mod tests {
                 "--interpreter=mi3",
                 "--quiet",
                 "--nx",
+                "-iex",
+                "set mi-async on",
+                "-iex",
+                "set pagination off",
+                "-iex",
+                "set confirm off",
                 "--core",
                 "/tmp/core"
             ]
@@ -318,7 +371,6 @@ mod tests {
             .with_program("gdb")
             .with_ssh(SshConfig::new("remote.example.com"));
         let argv = build_argv(&config);
-        // No -p (port 22), no -i, -T, bare host, --, then GDB argv.
         assert_eq!(
             argv_strings(&argv),
             vec![
@@ -329,7 +381,15 @@ mod tests {
                 "gdb",
                 "--interpreter=mi3",
                 "--quiet",
-                "--nx"
+                "--nx",
+                "-iex",
+                "set mi-async on",
+                "-iex",
+                "set pagination off",
+                "-iex",
+                "set confirm off",
+                "-iex",
+                "set non-stop on",
             ]
         );
     }
@@ -357,7 +417,15 @@ mod tests {
                 "/opt/gdb",
                 "--interpreter=mi3",
                 "--quiet",
-                "--nx"
+                "--nx",
+                "-iex",
+                "set mi-async on",
+                "-iex",
+                "set pagination off",
+                "-iex",
+                "set confirm off",
+                "-iex",
+                "set non-stop on",
             ]
         );
     }
@@ -366,6 +434,7 @@ mod tests {
     fn build_argv_ssh_forwards_gdb_extra_args_after_separator() {
         let config = GdbConfig::new()
             .with_program("gdb")
+            .with_non_stop(false)
             .with_arg("--core")
             .with_arg("/var/core/dump")
             .with_ssh(SshConfig::new("host").with_port(2222));
@@ -383,6 +452,12 @@ mod tests {
                 "--interpreter=mi3",
                 "--quiet",
                 "--nx",
+                "-iex",
+                "set mi-async on",
+                "-iex",
+                "set pagination off",
+                "-iex",
+                "set confirm off",
                 "--core",
                 "/var/core/dump"
             ]
@@ -391,7 +466,6 @@ mod tests {
 
     #[test]
     fn build_argv_ssh_omits_port_flag_when_default_22() {
-        // Regression guard: port 22 must not emit `-p 22`.
         let config = GdbConfig::new()
             .with_program("gdb")
             .with_ssh(SshConfig::new("host"));
@@ -408,5 +482,41 @@ mod tests {
             .with_mi_version(MiVersion::Mi2);
         let argv = build_argv(&config);
         assert!(argv_strings(&argv).contains(&"--interpreter=mi2".to_string()));
+    }
+
+    #[test]
+    fn build_argv_no_non_stop_iex_when_disabled() {
+        let config = GdbConfig::new()
+            .with_program("gdb")
+            .with_non_stop(false);
+        let argv = build_argv(&config);
+        let strs = argv_strings(&argv);
+        assert!(strs.contains(&"set mi-async on".to_string()));
+        assert!(strs.contains(&"set pagination off".to_string()));
+        assert!(!strs.contains(&"set non-stop on".to_string()));
+    }
+
+    #[test]
+    fn build_argv_includes_iex_before_core_args() {
+        // Verify that -iex flags precede -p / --core, so GDB applies
+        // the bootstrap settings before attaching or loading core.
+        let config = GdbConfig::new()
+            .with_program("gdb")
+            .with_non_stop(false)
+            .with_arg("-p")
+            .with_arg("1234");
+        let argv = build_argv(&config);
+        let iex_pos = argv_strings(&argv)
+            .iter()
+            .position(|s| s == "set confirm off")
+            .unwrap();
+        let pid_pos = argv_strings(&argv)
+            .iter()
+            .position(|s| s == "-p")
+            .unwrap();
+        assert!(
+            iex_pos < pid_pos,
+            "-iex flags must precede -p / --core to apply before attach"
+        );
     }
 }
