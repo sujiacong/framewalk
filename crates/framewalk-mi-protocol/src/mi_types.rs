@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Per the manual: 0 = names only, 1 = all values, 2 = simple values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(inline)]
 pub enum PrintValues {
     /// Names only (no values or types).
     NoValues,
@@ -44,6 +45,7 @@ impl PrintValues {
 ///
 /// Per the manual: x=hex, o=octal, t=binary, d=decimal, r=raw, N=natural.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(inline)]
 pub enum RegisterFormat {
     Hex,
     Octal,
@@ -72,6 +74,7 @@ impl RegisterFormat {
 ///
 /// Per the manual: none, bytes, or display.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(inline)]
 pub enum OpcodeMode {
     /// No opcodes shown.
     None,
@@ -96,6 +99,7 @@ impl OpcodeMode {
 ///
 /// Per the manual: default is write, `-r` is read, `-a` is access.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(inline)]
 pub enum WatchType {
     /// Stop on write (default).
     Write,
@@ -110,6 +114,7 @@ pub enum WatchType {
 /// Per the manual: `binary`, `decimal`, `hexadecimal`, `octal`,
 /// `natural`, `zero-hexadecimal`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(inline)]
 pub enum VarFormat {
     Binary,
     Decimal,
@@ -139,6 +144,7 @@ impl VarFormat {
 /// Per the manual: `x`=hex, `d`=decimal, `o`=octal, `t`=binary,
 /// `f`=float, `c`=character, `s`=string, `a`=address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(inline)]
 pub enum MemoryWordFormat {
     Hex,
     Decimal,
@@ -171,6 +177,7 @@ impl MemoryWordFormat {
 ///
 /// Each variant carries the parameters that mode requires.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(inline)]
 pub enum TraceFindMode {
     /// Stop looking at trace frames.
     None,
